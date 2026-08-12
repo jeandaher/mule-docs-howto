@@ -4,7 +4,7 @@ Pour créer un Projet API pour tes specifications dans Anypoint Code Builder, su
 
 1- In the activity bar of the VsCode, click on the icon (M) Anypoint Code Builder, and choose Design an API.   
 
-![Spécification 001](images/01-spec-010.png)    
+![Spécification 001](images/001-spec-010.png)    
 
 2-👉 Si vous n'etes pas connecté à Anypoint Platform, clicque sur se connecter en bas de l'IDE.     
 
