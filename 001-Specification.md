@@ -1,21 +1,27 @@
 # Create a New API Specification Project
 
-To create an API spec project in Anypoint Code Builder:    
+Pour créer un Projet API pour tes specifications dans Anypoint Code Builder, suivre les étapes suivantes:    
 
-In the activity bar of the VsCode, click on the icon (M) Anypoint Code Builder, and choose Design an API.   
+1- In the activity bar of the VsCode, click on the icon (M) Anypoint Code Builder, and choose Design an API.   
 
 ![Spécification 001](images/01-spec-010.png)    
 
-| Field Name           | Field Value                                              |
-|----------------------|----------------------------------------------------------|
-| **Project Name**     | Donner un nom au projet **sf-case-api**.                 |
-| **Project Location** | Mettre tes projets sous c:\src\mule.                     |
-| **API Type**         | Selectionner le type de API spec to create: **REST API**.|
-| API Spec Language    | **OAS 3.0 (YAML)**                                       | 
+2-👉 Si vous n'etes pas connecté à Anypoint Platform, clicque sur se connecter en bas de l'IDE.     
 
-👉 Click **Create Project**    
+3-👉 Remplir les onfos du projet:     
 
-Copier et coller les specifications suivantes:    
+| Field Name           | Field Value                                                   |
+|----------------------|---------------------------------------------------------------|
+| **Enable Agent**     | ☑️Enable this API for Agent Topic and Actions                   |
+| **Project Name**     | Donner un nom au projet **sf-case-api**.                      |
+| **Project Location** | Mettre tes projets sous c:\src\mule.                          |
+| **API Type**         | Selectionner le type de API spec to create: **REST API**.     |
+| API Spec Language    | **OAS 3.0 (YAML)**                                            | 
+| Business Group (opt) | Selectionner le business groupe mis dans Anypoint **Uprizon** | 
+
+3-👉 Clicque sur leboutton **Create Project**    
+
+Copier et coller les specifications suivantes dans le fichier **sf-case-api.yaml**:    
 
 ```.yaml
 openapi: 3.0.0
@@ -267,4 +273,6 @@ components:
 
 
 
+
+[Document de référence](https://docs.mulesoft.com/anypoint-code-builder/des-designing-api-specs)    
 
