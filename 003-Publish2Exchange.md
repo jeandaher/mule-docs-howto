@@ -21,4 +21,13 @@ Choose a project name (Press "Enter")
 Choose a project location     
 ![Project location](images/003-publish-050.png)    
 
+
+## Locate your published API in Exchange
+1-👉 Aller dans Anypoint Platform, naviguer vers APIs/Exchange et on va voir notre API publié!    
+
+![API published in Exchange](images/003-publish-060.png)    
+
+
+
+
 [Document de référence](https://docs.mulesoft.com/anypoint-code-builder/des-publish-api-spec-to-exchange)   
