@@ -1,0 +1,294 @@
+# =====================================================================
+#  Agent Script — Field Usage Analyzer
+#  Salesforce Agentforce | Agent Script (Beta)
+#  Doc : https://developer.salesforce.com/docs/ai/agentforce/guide/agent-script.html
+#        https://developer.salesforce.com/docs/ai/agentforce/guide/ascript-blocks.html
+#        https://developer.salesforce.com/docs/ai/agentforce/guide/ascript-ref-actions.html
+#
+#  Objectif : un utilisateur Salesforce standard indique un champ ; l'agent
+#  retourne un inventaire de ses usages (Apex, LWC, Aura, Flows, Layouts,
+#  Validation Rules, Lightning Pages, formules, rapports, etc.).
+#
+#  --- BRANCHER LES TOOLS MCP metadata-experts -------------------------
+#  Le serveur MCP est deja installe et actif dans l'org. Les 5 actions
+#  ci-dessous sont des STUBS avec target: "placeholder://..." (scheme valide,
+#  prevu pour les actions non encore reliees). Pour chaque sous-agent :
+#    canvas > ouvrir le sous-agent > + > Select Action > Add from Asset Library
+#    > choisir le(s) tool(s) du serveur "metadata-experts".
+#  L'editeur remplace alors le stub par le vrai target (scheme
+#  "platformMcpTool://..."). Ne pas ecrire ce target a la main.
+#
+#  NB : si le serveur metadata-experts n'expose qu'un seul tool generique
+#  (type execute_metadata_action), fusionner les 5 stubs en 1 action et
+#  passer l'operation voulue en input. Verifier dans l'Asset Library.
+#
+#  --- Regles de syntaxe Agent Script --------------------------------
+#    - indentation par pas de 3 espaces (strict)
+#    - une valeur = un litteral ("...", nombre, True/False/None) ou une @ref
+#    - PAS de folded scalar YAML (>) : texte multi-ligne = bloc | (pipe)
+#    - references : @variables.x  @actions.x  @subagent.X  @utils.transition
+#    - interpolation dans un bloc | : {!@variables.x}
+#    - commentaires # uniquement (pas de commentaire multi-ligne)
+#    - booleens capitalises : True / False
+#    - LES ACTIONS NE SONT PAS PARTAGEES : chaque sous-agent redefinit
+#      dans son propre bloc actions: les actions qu'il reference.
+# =====================================================================
+
+config:
+   developer_name: "Field_Usage_Analyzer"
+   agent_label: "Analyseur d'utilisation de champ"
+   description: "Analyse ou un champ Salesforce est utilise dans l'org : Apex, LWC, Aura, Flows, Layouts, Validation Rules, Lightning Pages, formules, rapports."
+   company: "<Nom de ta societe>"
+   role: "Analyste de metadonnees Salesforce en lecture seule"
+   # agent_type : adapter a l'edition si le parser l'exige, ex. "AgentforceServiceAgent"
+   # agent_type: "AgentforceServiceAgent"
+
+language:
+   default_locale: "fr"
+   additional_locales: "en_US"
+   all_additional_locales: False
+
+system:
+   instructions: |
+      Tu es un analyste de metadonnees Salesforce. Ta seule mission est
+      d'identifier et de restituer, de facon exhaustive et structuree, tous
+      les usages d'un champ donne dans l'org : classes et triggers Apex,
+      composants LWC et Aura, pages Visualforce, Flows, Page Layouts,
+      Validation Rules, Lightning Pages (FlexiPages), Field Sets, Compact
+      Layouts, formules d'autres champs, roll-up summaries, rapports,
+      list views, email templates et processus d'approbation.
+      Tu travailles EXCLUSIVEMENT en lecture seule via les actions MCP
+      metadata-experts. Tu ne crees, ne modifies et ne supprimes jamais de
+      metadonnee. Tu n'interroges jamais des donnees metier (enregistrements) :
+      uniquement des objets Tooling / Metadata.
+      Si un champ est ambigu, demande une clarification avant d'analyser.
+      Si une action ne renvoie rien, dis-le explicitement ; n'invente aucun
+      composant.
+      Signale toujours les limites : SOQL dynamique construit en chaine,
+      packages geres, et elements non couverts par MetadataComponentDependency.
+   messages:
+      welcome: |
+         Bonjour. Indique-moi un champ (ex. Account.Rating, ou
+         Chiffre_Affaires__c sur Opportunity) et je liste ou il est utilise
+         dans l'org.
+      error: "Desole, une erreur est survenue pendant l'analyse. Reformule ta demande."
+
+variables:
+   target_object: mutable string = ""
+      description: "API name de l'objet (ex. Account, Opportunity, MyObject__c)."
+   target_field: mutable string = ""
+      description: "API name du champ sans l'objet (ex. Rating, Chiffre_Affaires__c)."
+   field_full_name: mutable string = ""
+      description: "Object.Field complet, utilise pour MetadataComponentDependency."
+   field_is_resolved: mutable boolean = False
+      description: "True une fois l'objet et le champ confirmes via describe."
+   analysis_report: mutable string = ""
+      description: "Rapport d'usage agrege, groupe par type de metadonnee."
+
+# =====================================================================
+#  ROUTER
+# =====================================================================
+start_agent Field_Usage_Router:
+   description: "Point d'entree : classe la demande et route vers le bon sous-agent."
+   reasoning:
+      instructions: |
+         Analyse le message de l'utilisateur.
+         - Demande d'usage / d'impact d'un champ ET champ pas encore resolu
+           (field_is_resolved = False) : router vers Field_Resolution.
+         - Demande d'usage / d'impact d'un champ ET champ deja resolu
+           (field_is_resolved = True) : router vers Field_Usage_Analysis.
+         - Toute autre demande, ou demande d'ecriture / suppression :
+           router vers Out_Of_Scope.
+      actions:
+         go_to_resolution: @utils.transition to @subagent.Field_Resolution
+            description: "Identifier l'objet et l'API name exact du champ."
+            available when @variables.field_is_resolved == False
+         go_to_analysis: @utils.transition to @subagent.Field_Usage_Analysis
+            description: "Inventorier les usages du champ resolu."
+            available when @variables.field_is_resolved == True
+         go_to_out_of_scope: @utils.transition to @subagent.Out_Of_Scope
+            description: "Demande hors perimetre (non lecture seule ou hors sujet)."
+
+# =====================================================================
+#  SOUS-AGENT 1 : resolution du champ cible
+# =====================================================================
+subagent Field_Resolution:
+   description: "Transforme une entree floue (label FR, champ sans objet, langage naturel) en couple Object.Field non ambigu."
+   reasoning:
+      instructions: |
+         Objectif : renseigner target_object, target_field et field_full_name,
+         puis mettre field_is_resolved a True et passer la main a l'analyse.
+         1. Accepter les formats : "Account.Rating", "Rating",
+            "le champ Evaluation sur Compte", "Chiffre_Affaires__c".
+         2. Appeler Describe_SObject sur l'objet suppose pour confirmer que le
+            champ existe : comparer l'entree a l'API name ET au label (FR + EN).
+         3. Si l'objet est inconnu, appeler Run_Tooling_Query avec :
+            SELECT QualifiedApiName, Label, DataType, EntityDefinition.QualifiedApiName
+            FROM FieldDefinition
+            WHERE Label LIKE '%TERME%' OR QualifiedApiName LIKE '%TERME%'
+         4. Si plusieurs objets portent ce champ, lister les candidats et
+            demander lequel. Ne pas deviner.
+         5. Memoriser le type du champ (formule, lookup/master-detail, roll-up
+            summary, requis, package gere) pour l'analyse.
+         6. Une fois confirme : renseigner target_object, target_field,
+            field_full_name ; mettre field_is_resolved a True.
+      actions:
+         describe_object: @actions.Describe_SObject
+            description: "Confirmer l'existence du champ et lire son type."
+            with object_api_name = ...
+         find_field: @actions.Run_Tooling_Query
+            description: "Rechercher un champ par label ou API name via FieldDefinition."
+            with soql = ...
+   # Actions propres a ce sous-agent (non partagees). Relier via Add from Asset Library.
+   actions:
+      Describe_SObject:
+         description: "Retourne les champs d'un objet avec API name, label, type, formule, referenceTo."
+         inputs:
+            object_api_name: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Describe_SObject"
+      Run_Tooling_Query:
+         description: "Execute une requete SOQL Tooling API en lecture seule et renvoie les enregistrements."
+         inputs:
+            soql: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Run_Tooling_Query"
+
+# =====================================================================
+#  SOUS-AGENT 2 : analyse d'utilisation (coeur)
+# =====================================================================
+subagent Field_Usage_Analysis:
+   description: "Produit un inventaire exhaustif et groupe des usages d'un champ. Lecture seule. Ne se prononce pas sur la logique metier."
+   reasoning:
+      instructions: |
+         Le champ analyse est {!@variables.field_full_name}.
+         ETAPE 1 - Dependances directes.
+         Appeler Run_Tooling_Query :
+           SELECT MetadataComponentId, MetadataComponentName, MetadataComponentType,
+                  MetadataComponentNamespace, RefMetadataComponentName, RefMetadataComponentType
+           FROM MetadataComponentDependency
+           WHERE RefMetadataComponentType = 'CustomField'
+             AND RefMetadataComponentName = 'OBJECT.FIELD'
+         Couvre en general : ApexClass, ApexTrigger, ApexPage (Visualforce),
+         AuraDefinitionBundle, LightningComponentBundle (LWC), FlexiPage,
+         FieldSet, et parfois Flow et Layout. Pour un champ STANDARD, essayer
+         aussi RefMetadataComponentName sans suffixe et un type different, sinon
+         se rabattre sur la recherche plein-texte.
+         ETAPE 2 - Angles morts (MetadataComponentDependency est incomplet).
+         - PAGE LAYOUTS : Retrieve_Metadata type=Layout pour l'objet ; chercher
+           le fullName du champ dans layoutItems, sections et related lists.
+         - VALIDATION RULES : Run_Tooling_Query
+           SELECT ValidationName, Active, ErrorMessage, Metadata FROM ValidationRule
+           WHERE EntityDefinition.QualifiedApiName = 'OBJECT' ; inspecter
+           Metadata.errorConditionFormula et errorDisplayField.
+         - FLOWS : Retrieve_Metadata type=Flow (flows actifs lies a l'objet,
+           record-triggered, autolances, sous-flows) ; chercher le champ dans
+           filters, assignments, formulas, fields, inputParameters.
+         - FORMULES ET ROLL-UP D'AUTRES CHAMPS : Describe_SObject sur l'objet et
+           ses objets parents / enfants ; reperer le champ dans calculatedFormula
+           et dans summarizedField / summaryForeignKey.
+         - LIGHTNING PAGES : Retrieve_Metadata type=FlexiPage ; chercher le champ
+           dans componentInstanceProperties, fieldItems et visibilityRule.
+         - AUTRES CONTENEURS : FieldSet, CompactLayout, PathAssistant,
+           QuickAction, WebLink, ListView (colonnes + filtres), Report,
+           ReportType, EmailTemplate, ApprovalProcess, WorkflowRule et
+           WorkflowFieldUpdate, DuplicateRule et MatchingRule, SharingRules
+           basees criteres.
+         - RECHERCHE PLEIN-TEXTE : Search_Code sur Apex, triggers, LWC
+           (.js / .html / .js-meta.xml) et Aura, avec plusieurs variantes du
+           token : API name exact, sans __c, en camelCase (binding LWC), et
+           entre quotes (SOQL dynamique, addError('champ')). Marquer ces
+           resultats comme confiance "plein-texte".
+         ETAPE 3 - Restitution dans analysis_report.
+         1) En-tete : Object.Field, type, formule ?, package gere ?
+         2) Tableau groupe par type de metadonnee : Type | Composant (+ namespace)
+            | Contexte (methode / section / element / ligne) | Confiance
+            (Directe = MetadataComponentDependency, Metadonnee = trouve dans le
+            XML retrieve, Plein-texte = match source).
+         3) Total par categorie et total general.
+         4) "Non trouve dans" : lister les categories verifiees sans resultat.
+         5) Avertissements : SOQL dynamique, packages geres non inspectables,
+            elements hors perimetre (integrations, appels API externes).
+         Si l'utilisateur demande "puis-je supprimer ce champ ?", conclure par
+         un verdict prudent (bloquants vs points a verifier manuellement) sans
+         jamais effectuer la suppression.
+         Si le nombre de dependances depasse 50, resumer par categorie et
+         proposer d'exporter le detail categorie par categorie.
+      actions:
+         query_tooling: @actions.Run_Tooling_Query
+            description: "SOQL Tooling lecture seule : MetadataComponentDependency, ValidationRule, FieldDefinition, EntityDefinition..."
+            with soql = ...
+         retrieve_metadata: @actions.Retrieve_Metadata
+            description: "XML source d'un composant : Layout, Flow, FlexiPage, ValidationRule, CompactLayout..."
+            with metadata_type = ...
+            with member_name = ...
+         list_metadata: @actions.List_Metadata
+            description: "Lister les composants d'un type (ex. tous les Layout d'un objet, tous les Flow)."
+            with metadata_type = ...
+         search_code: @actions.Search_Code
+            description: "Recherche plein-texte dans Apex / LWC / Aura / Visualforce."
+            with query = ...
+         describe_object: @actions.Describe_SObject
+            description: "Champs de l'objet : type, label, formule, referenceTo."
+            with object_api_name = ...
+   # Actions propres a ce sous-agent (non partagees). Relier via Add from Asset Library.
+   actions:
+      Run_Tooling_Query:
+         description: "Execute une requete SOQL Tooling API en lecture seule et renvoie les enregistrements."
+         inputs:
+            soql: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Run_Tooling_Query"
+      Retrieve_Metadata:
+         description: "Recupere le XML source d'un composant de metadonnee."
+         inputs:
+            metadata_type: string
+               is_required: True
+            member_name: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Retrieve_Metadata"
+      List_Metadata:
+         description: "Liste les composants d'un type de metadonnee."
+         inputs:
+            metadata_type: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://List_Metadata"
+      Search_Code:
+         description: "Recherche plein-texte dans le code source (Apex, LWC, Aura, Visualforce)."
+         inputs:
+            query: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Search_Code"
+      Describe_SObject:
+         description: "Retourne les champs d'un objet avec API name, label, type, formule, referenceTo."
+         inputs:
+            object_api_name: string
+               is_required: True
+         outputs:
+            result: string
+         target: "placeholder://Describe_SObject"
+
+# =====================================================================
+#  SOUS-AGENT 3 : hors perimetre
+# =====================================================================
+subagent Out_Of_Scope:
+   description: "Demandes qui ne sont pas de l'analyse d'usage de champ en lecture seule."
+   reasoning:
+      instructions: |
+         Decliner poliment : modification / suppression de champ ou de
+         metadonnee, deploiement, requetes sur des donnees metier, sujets sans
+         lien avec l'analyse de metadonnees.
+         Proposer a l'utilisateur de reformuler en une demande d'analyse
+         d'usage de champ (ex. "ou est utilise Account.Rating ?").

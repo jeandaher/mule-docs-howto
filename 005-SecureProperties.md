@@ -66,7 +66,7 @@ Declare the secure properties configuration in your Mule app:
 
 Example encrypted Salesforce password:
 ```    
-salesforce.jwt.keyStorePassword: "![SILBzI1hvmuGuTJoFmL+Tg==]"
+salesforce.jwt.keyStorePassword: "![SIxxxxxxxxxxxxFmL+Tg==]"
 ```
 
 Encrypt a value using MuleSoft’s tool:

@@ -8,28 +8,17 @@ It explains the two log types used in the Starter App and Common Modules: Root L
 
 ## 1. Logging Principles    
 
-```mermaid
-flowchart TD
-
-    A[Mule Application] --> B[Telemetry Output]
-
-    B --> C[Logs<br/>(Root Log + Observability JSON)]
-    B --> D[Metrics<br/>(Latency, Payload, JVM Heap)]
-    B --> E[Traces<br/>(TracePoints START/END/API/TRANSFORM)]
-
-    C --> F[Anypoint Monitoring]
-    D --> F
-    E --> F
-
-    F --> G[Dashboards]
-    F --> H[Alerts]
-
-    style C fill:#f5f5f5,stroke:#333,stroke-width:1px
-    style D fill:#f5f5f5,stroke:#333,stroke-width:1px
-    style E fill:#f5f5f5,stroke:#333,stroke-width:1px
-    style F fill:#e8f0fe,stroke:#333,stroke-width:1px
-    style G fill:#d2f8d2,stroke:#333,stroke-width:1px
-    style H fill:#ffd2d2,stroke:#333,stroke-width:1px
+```mermaid   
+graph TD;
+    A["📡 Logging"];
+    A --> C["📝 Logs Root and Observability"];
+    A --> D["📊 Metrics Latency Payload JVM"];
+    A --> E["🔍 Traces TracePoints"];
+    C --> F["📈 Anypoint Monitoring"];
+    D --> F;
+    E --> F;
+    F --> G["📊 Dashboards"];
+    F --> H["🔔 Alerts"];
 ```
 
 ### Root Log Principles
